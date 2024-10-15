@@ -2,7 +2,7 @@ from typing import NoReturn
 from datasets import load_from_disk
 from transformers import EvalPrediction
 from utils.metric_extraction import postprocess_qa_predictions
-
+import torch
 
 class ExtracionDataModule():
     def __init__(self, data_args, training_args, tokenizer) -> NoReturn:
@@ -273,7 +273,7 @@ class ExtracionDataModuleforInference():
             return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
 
-class generationDataModule():
+class GenerationDataModule():
     def __init__(self, data_args, training_args, tokenizer) -> NoReturn:
         self.data_args = data_args
         self.training_args = training_args
@@ -290,12 +290,19 @@ class generationDataModule():
         <|im_start|>user
         question:{} 
         context:{}<|im_end|>
-        <|im_start|>assistant{}'''
-        question = instance['question']
-        context = instance['context']
+        <|im_start|>assistant
+        {}<|im_end|>'''
+        questions = instance['question']
+        contexts = instance['context']
         answers = [answer['text'][0] for answer in instance['answers']]
-        promt = [prefix_chat_template.format(question[i], context[i], answers[i]) for i in range(len(question))]
-        instance['promt'] = promt
+        prompt = [prefix_chat_template.format(q, c, a) for q, c, a in zip(questions, contexts, answers)]
+        prompts = self.tokenizer(prompt,
+                                max_length=2000,
+                                padding="max_length",
+                                truncation=True,
+                                return_tensors='pt')
+        instance = {k: v for k, v in instance.items()}
+        instance['prompt'] = prompts['input_ids']
         return instance
 
     def _generate_validation_prompt(self, instance):
@@ -303,33 +310,37 @@ class generationDataModule():
         You are Qwen, created by Alibaba Cloud. You are a helpful assistant. 모든 대답은 한국어로 해주세요.<|im_end|>
         <|im_start|>user
         question:{} 
-        context:{}<|im_end|>
-        <|im_start|>assistant'''
+        context:{}<|im_end|>'''
         question = instance['question']
         context = instance['context']
         answers = [answer['text'][0] for answer in instance['answers']]
-        promt = [prefix_chat_template.format(question[i], context[i]) for i in range(len(question))]
-        instance['promt'] = promt
-        instance['answers'] = answers
+        answer = self.tokenizer(answers,
+                                max_length=self.data_args.max_answer_length,
+                                padding='max_length',
+                                return_tensors='pt')
+        prompt = [prefix_chat_template.format(question[i], context[i]) for i in range(len(question))]
+        prompt = self.tokenizer(prompt,
+                                max_length=self.training_args.max_seq_length,
+                                padding="max_length",
+                                return_tensors='pt')
+        instance = {k: v for k, v in instance.items() if k != 'prompt'}
+        instance['prompt'] = prompt['input_ids']
+        instance['answers'] = answers['input_ids']
         return instance
     
     def get_processing_data(self):
         # dataset에서 train feature를 생성
         train_dataset = self.datasets["train"]
-        # train_text_column = [self._generate_training_prompt(instance) for instance in train_dataset]
-        # train_dataset = train_dataset.add_column("prompt", train_text_column)
-        train_dataset = train_dataset.shuffle(seed=104)  
+        train_dataset = train_dataset.shuffle(seed=104)
         train_dataset = train_dataset.map(self._generate_training_prompt, 
                             batched=True,
                             num_proc=self.data_args.preprocessing_num_workers,
                             remove_columns=self.column_names,
                             load_from_cache_file=not self.data_args.overwrite_cache,
                         )
-
+        print('traindata : ', train_dataset)
         # Validation feature 생성
         eval_dataset = self.datasets["validation"]
-        # eval_text_column = [self._generate_validation_prompt(instance) for instance in eval_dataset]
-        # eval_dataset = eval_dataset.add_column("prompt", eval_text_column)
         eval_dataset = eval_dataset.map(
             self._generate_validation_prompt,
             batched=True,
@@ -337,24 +348,21 @@ class generationDataModule():
             remove_columns=self.column_names,
             load_from_cache_file=not self.data_args.overwrite_cache,
         )
-        
+        print('preprocess')
+        print(train_dataset.column_names)
+        print(eval_dataset.column_names)
         return train_dataset, eval_dataset
 
-    def _post_processing_function(self, examples, features, predictions, training_args):
-        print('post_process')
-        print(examples, features)
-        print(predictions[0])
-        exit()
+    def _post_processing_function(self, predictions, examples):
+        #print('examples : ', examples[0])
+        print('examples shape : ', examples.shape)
+        # print('predictions : ', predictions[0])
+        print('predictions shape : ', predictions.shape)
         # Metric을 구할 수 있도록 Format을 맞춰줍니다.
-        formatted_predictions = [
-            {"id": k, "prediction_text": v} for k, v in predictions.items()
-        ]
+        formatted_predictions = torch.argmax(predictions, axis=-1)
         
-        if training_args.do_predict:
+        if self.training_args.do_predict:
             return formatted_predictions
-        elif training_args.do_eval:
-            references = [
-                {"id": ex["id"], "answers": ex[self.answer_column_name]}
-                for ex in self.datasets["validation"]
-            ]
+        elif self.training_args.do_eval:
+            references = examples
             return EvalPrediction(predictions=formatted_predictions, label_ids=references)

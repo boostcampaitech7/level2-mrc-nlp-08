@@ -9,9 +9,9 @@ from tqdm.auto import tqdm
 #from datasets import load_metric
 from evaluate import load
 
-#config = json.load(open("./utils/log/logger.json"))
-#logging.config.dictConfig(config)
-#logger = logging.getLogger(__name__)
+config = json.load(open("./utils/log/logger.json"))
+logging.config.dictConfig(config)
+logger = logging.getLogger(__name__)
 
 metric = load("squad")
 

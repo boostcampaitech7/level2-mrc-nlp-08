@@ -4,7 +4,6 @@ from transformers import TrainingArguments, HfArgumentParser
 from dataclasses import dataclass, field
 from trl import SFTConfig
 
-
 @dataclass
 class ModelArguments:
     """
@@ -25,7 +24,7 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default="/data/ephemeral/home/hwk_workspace/data/train_dataset",
+        default="./resources/data/train_dataset",
         metadata={"help": "The name of the dataset to use."},
     )
     overwrite_cache: bool = field(
@@ -86,20 +85,20 @@ class OurTrainingArguments(SFTConfig):
         },
     )
     per_device_train_batch_size: int = field(
-        default=8,
+        default=1,
         metadata={
             "help": "학습 중 장치당 배치 크기"
             "GPU 메모리에 따라 줄여서 사용 / 너무 큰 배치는 지양"
         },
     )
     per_device_eval_batch_size: int = field(
-        default=8,
+        default=4,
         metadata={
             "help": "평가 중 장치당 배치 크기"
         },
     )
     gradient_accumulation_steps: int = field(
-        default=2,
+        default=8,
         metadata={
             "help": "그래디언트 누적을 위한 스텝 수"
             "GPU 자원이 부족할 시 배치를 줄이고 누적 수를 늘려 학습"
@@ -164,7 +163,7 @@ class OurTrainingArguments(SFTConfig):
             "help": "어떤 step에서 저장할지"},
     )
     eval_steps: int = field(
-        default=200,
+        default=2,
         metadata={
             "help": "어떤 step에서 저장할지"},
     )
@@ -191,11 +190,13 @@ class OurTrainingArguments(SFTConfig):
             "than this will be truncated, sequences shorter will be padded."
         },
     )
-
+    # save_strategy='steps',
+    # load_best_model_at_end = True,
+    # save_total_limit = 3
 
 if __name__ == "__main__":
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, OurTrainingArguments)
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    print(training_args)
+    print('training_args : ', training_args)

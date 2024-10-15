@@ -6,10 +6,11 @@ import logging
 import logging.config
 import torch
 from utils.arguments_gen_reader import ModelArguments, DataTrainingArguments, OurTrainingArguments
-from utils.data_processing import generationDataModule
+from utils.data_processing import GenerationDataModule
 from utils.metric_extraction import compute_metrics
-from transformers import HfArgumentParser, set_seed, AutoTokenizer, AutoModelForCausalLM, DataCollatorForLanguageModeling
+from transformers import HfArgumentParser, set_seed, AutoTokenizer, AutoModelForCausalLM, DataCollatorForLanguageModeling, BitsAndBytesConfig
 from trl import SFTTrainer
+from peft import get_peft_model, LoraConfig
 
 seed = 104
 random.seed(seed) # python random seed 고정
@@ -19,9 +20,9 @@ torch.cuda.manual_seed_all(seed)
 
 config = json.load(open("./utils/log/logger.json"))
 config['handlers']['file_debug']['filename'] = "./utils/log/generation/debug.log"
-config['handlers']['file_debug']['filename'] = "./utils/log/generation/error.log"
-#logging.config.dictConfig(config)
-#logger = logging.getLogger(__name__)
+config['handlers']['file_error']['filename'] = "./utils/log/generation/error.log"
+logging.config.dictConfig(config)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -30,25 +31,29 @@ def main():
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     # 학습 파라미터 로깅
-    #logger.info(f"Model is from {model_args.model_name_or_path}")
-    #logger.info(f"Data is from {data_args.dataset_name}")
-    #logger.info("Training/evaluation parameters %s", training_args)
+    logger.info(f"Model is from {model_args.model_name_or_path}")
+    logger.info(f"Data is from {data_args.dataset_name}")
+    logger.info("Training/evaluation parameters %s", training_args)
 
     # 모델을 초기화하기 전에 난수를 고정
     set_seed(training_args.seed)
 
     # pretrained model 과 tokenizer를 불러오기
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        quantization_config=quantization_config
     )
-    #logger.info(model)
+    lora_config = LoraConfig(r=4, lora_dropout=0.1, task_type="CAUSAL_LM")
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    logger.info(model)
     
     # 데이터 불러오기 및 전처리 data_args, training_args, tokenizer
-    dm = generationDataModule(data_args, training_args, tokenizer) # 이 부분을 많이 고치셔야 할 것
+    dm = GenerationDataModule(data_args, training_args, tokenizer) # 이 부분을 많이 고치셔야 할 것
     train_dataset, eval_dataset = dm.get_processing_data()
-
     # Trainer 초기화
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side='right'
@@ -62,6 +67,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        peft_config=lora_config,
         # formatting_func = 'promt' # 사전에 promt를 전처리할 지 / 학습 중 promt를 만들어서 학습할지
         tokenizer=tokenizer,
         packing= training_args.packing,
@@ -78,9 +84,9 @@ def main():
     metrics = train_result.metrics
     metrics["train_samples"] = len(train_dataset)
 
-    #trainer.log_metrics("train", metrics)
-    #trainer.save_metrics("train", metrics)
-    #trainer.save_state()
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    trainer.save_state()
 
     output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
 
@@ -95,14 +101,14 @@ def main():
         os.path.join(training_args.output_dir, "trainer_state.json")
     )
 
-    # # Evaluation -> 나중에 구현
-    # logger.info("***** Evaluate *****")
-    # metrics = trainer.evaluate()
+    # Evaluation -> 나중에 구현
+    logger.info("***** Evaluate *****")
+    metrics = trainer.evaluate()
 
-    # metrics["eval_samples"] = len(eval_dataset)
+    metrics["eval_samples"] = len(eval_dataset)
 
-    # trainer.log_metrics("eval", metrics)
-    # trainer.save_metrics("eval", metrics)
+    trainer.log_metrics("eval", metrics)
+    trainer.save_metrics("eval", metrics)
 
 
 if __name__ == "__main__":
