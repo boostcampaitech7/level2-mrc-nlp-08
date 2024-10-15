@@ -6,14 +6,14 @@ from typing import Any, Optional, Tuple
 from transformers import EvalPrediction
 import numpy as np
 from tqdm.auto import tqdm
-from datasets import load_metric
+#from datasets import load_metric
+from evaluate import load
 
 #config = json.load(open("./utils/log/logger.json"))
 #logging.config.dictConfig(config)
 #logger = logging.getLogger(__name__)
 
-metric = load_metric("squad")
-
+metric = load("squad")
 
 def compute_metrics(p: EvalPrediction):
     result = metric.compute(predictions=p.predictions, references=p.label_ids)
