@@ -1,0 +1,16 @@
+torch
+datasets==2.15.0
+transformers
+transformers[torch]
+trl
+peft
+bitsandbytes
+tqdm
+pandas
+scikit-learn
+numpy==1.26.4
+rank-bm25
+kiwipiepy
+
+# faiss install (if you want to)
+faiss-gpu
