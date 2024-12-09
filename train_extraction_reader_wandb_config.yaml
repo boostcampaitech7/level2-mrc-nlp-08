@@ -1,0 +1,9 @@
+method: grid  # or bayes, random
+metric:
+  name: exact_match  # 모니터링할 지표: exact_match or f1
+  goal: maximize       # 목표: maximize or minimize
+parameters:
+  model_name:
+    values:
+      - line1029/korquad-finetuned-roberta-large
+      - nlp04/ES_roberta_30_korquad_finetune
